@@ -1,73 +1,33 @@
-import sys
-sys.path.append('.')
-from cinema_reservation_system.database.db import Database
-from cinema_reservation_system.users.models import UserModel
-from cinema_reservation_system.database.user_specific.user_manipulation import *
-from cinema_reservation_system.database.create_tables import *
-from cinema_reservation_system.utls.hash_pass import hash_password
-from cinema_reservation_system.utls.create_salt import create_salt
-from cinema_reservation_system.utls.cookies import *
-from cinema_reservation_system.config.config_session import SESSION_NAME
-from cinema_reservation_system.decorators import atomic
+import cinema_reservation_system.users.models
+from cinema_reservation_system.users.models import User
+from cinema_reservation_system.decorators import atomicmethods
 
 
-
+@atomicmethods
 class UserGateway:
     def __init__(self):
-        self.model = UserModel
-        self.db = Database()
+        self.model = cinema_reservation_system.users.models.User
 
-    def create(self, *, email, password):
-        if self.model.validate(email, password):
+    def create(self, session, *, email, password, salt):
+        try:
+            session.add(User(email=email, password=password, salt=salt))
+            return email
+        except Exception as e:
+            return e
 
-            salt = create_salt()
-            if self.db.cursor.execute(SELECT_SALT, (salt, )):
-                salt = create_salt()
-            password = hash_password(password, salt)
+    def login(self, session, *, email, password):
+        return session.query(User.email).filter(User.email == email).filter(User.password == password).first()
 
-            self.db.cursor.execute(INSERT_USER, (email, password, salt))  # TODO: create user query
-            create_cookie(SESSION_NAME, email)
-            self.db.connection.commit()
-            self.db.connection.close()
-            print(f'Welcome user :{read_cookie(SESSION_NAME).split(",")[0]}')
-            return True
-        # TODO: What whould I return?
-        else:
-            # add better text later
-            print("Wrong password and email")
-        return False
+    def user(self, session, *, email):
+        return session.query(User.user_id).filter(User.email == email).first()
 
-    def login(self, *, email, password):
-        # fix if no salt
-        if self.db.cursor.execute(SELECT_USER_EMAIL, (email,)).fetchone():
-            salt = self.db.cursor.execute(SELECT_SALT_USER, (email, )).fetchone()[0]
+    def get_salt(self, session, salt):
+        salt = session.query(User.salt).filter(User.salt == salt).first()
+        if salt:
+            return salt
 
-            if salt:
-                password = hash_password(password, salt)
-            else:
-                return False
+    def get_user_email(self, session, email):
+        return session.query(User.email).filter(User.email == email).first()
 
-            if self.db.cursor.execute(SELECT_USER, (email, password)).fetchone():
-                create_cookie(SESSION_NAME, email)
-                print(f'Welcome user :{read_cookie(SESSION_NAME).split(",")[0]}')
-                return True
-            else:
-                print('Wrong password')
-        else:
-            print("Wrong username")
-        return False
-
-    def all(self):
-        raw_users = self.db.cursor.execute()  # TODO: Select all users
-
-        return [self.model(**row) for row in raw_users]
-
-    @atomic
-    def user(self, cursor, *, email):
-        cursor.execute('''
-            SELECT id
-              FROM users
-              WHERE email = (?)
-            ''', (email, ))
-
-        return cursor.fetchone()[0]
+    def get_user_salt(self, session, email):
+        return session.query(User.salt).filter(User.email == email).first()
